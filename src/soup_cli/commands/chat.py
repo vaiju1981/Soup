@@ -26,7 +26,10 @@ def chat(
     ),
     device: Optional[str] = typer.Option(
         None,
-        help="Device: cuda, mps, cpu. Auto-detected if not set.",
+        help=(
+            "Device to load the model on: cuda, cuda:1, mps, cpu. "
+            "Without it transformers places the model."
+        ),
     ),
     max_tokens: int = typer.Option(
         512,

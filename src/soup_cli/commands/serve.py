@@ -99,7 +99,10 @@ def serve(
     device: Optional[str] = typer.Option(
         None,
         "--device",
-        help="Device: cuda, mps, cpu. Auto-detected if not set.",
+        help=(
+            "Device to load the model on: cuda, cuda:1, mps, cpu. "
+            "Without it transformers places the model."
+        ),
     ),
     max_tokens_default: int = typer.Option(
         512,
