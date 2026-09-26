@@ -12,6 +12,12 @@ from soup_cli.utils.encoding import force_utf8_stdio
 force_utf8_stdio()
 _utf8_bootstrap_done = True
 
+# Must be in the environment before any command loads a model: transformers'
+# parallel weight loader segfaults loading onto MPS with a dtype cast.
+from soup_cli.utils.gpu import serialize_weight_loading_on_apple_silicon  # noqa: E402
+
+serialize_weight_loading_on_apple_silicon()
+
 import typer  # noqa: E402
 from rich.console import Console  # noqa: E402
 

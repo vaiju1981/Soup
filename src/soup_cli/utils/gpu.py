@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import math
 import os
+import platform
 import re
+import sys
 from typing import Optional
 
 # A safetensors file starts with a u64 little-endian header length, then a
@@ -61,6 +63,26 @@ def _params_from_local_safetensors(path: str) -> float | None:
         return (total / 1e9) if total else None
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return None  # unreadable/crafted -> fall back to the name guess
+
+
+def serialize_weight_loading_on_apple_silicon() -> None:
+    """Make transformers load checkpoint weights on one thread on Apple Silicon.
+
+    transformers 5.x materialises checkpoint tensors on a four-thread pool.
+    Loading onto MPS with a dtype other than the checkpoint's -- ``soup infer``
+    and ``soup chat`` load float16, and most checkpoints are bfloat16 --
+    segfaults in that pool (``core_model_loading._materialize_copy``), measured
+    on transformers 5.17.0 / torch 2.14.0: exit 139 on every attempt for
+    SmolLM2-135M and Qwen2.5-0.5B, while the same load on one thread succeeds.
+    transformers' own ``HF_DEACTIVATE_ASYNC_LOAD`` switch selects that path;
+    loading Qwen2.5-0.5B took 6.4 s with it against 6.8 s without.
+
+    Every load site in the process gets it, trainers included, because the
+    crash is in transformers rather than in one command. It is a default, so an
+    explicit value in the environment still wins.
+    """
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        os.environ.setdefault("HF_DEACTIVATE_ASYNC_LOAD", "1")
 
 
 def resolve_device_map(device: str):
