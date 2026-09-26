@@ -372,7 +372,9 @@ class MLXSFTTrainerWrapper:
         cfg = self.config
         console.print(f"[dim]Loading MLX model: {cfg.base}[/]")
         self.model, self.tokenizer, self._base_precision = load_mlx_model(
-            cfg.base, quantization=cfg.training.quantization
+            cfg.base,
+            quantization=cfg.training.quantization,
+            explicit="quantization" in cfg.training.model_fields_set,
         )
         console.print(
             f"[green]MLX model loaded:[/] {cfg.base} "

@@ -1207,8 +1207,8 @@ def train(
     gpu_info = get_gpu_info(backend=cfg.backend)
 
     # Quantization guard: explicit decision per #423.  See resolve_quantization()
-    # docstring for the full rationale — MLX 4-bit uses pre-quantized mlx-community
-    # weights (not bitsandbytes NF4), CPU cannot run bitsandbytes at all.
+    # docstring for the full rationale — MLX applies 4-bit itself (utils.mlx), not
+    # through bitsandbytes NF4; CPU cannot run bitsandbytes at all.
     resolved_quant, quant_warning = resolve_quantization(
         device=device,
         backend=cfg.backend,
@@ -1216,7 +1216,10 @@ def train(
     )
     if quant_warning:
         console.print(f"[yellow]{quant_warning}[/]")
-    cfg.training.quantization = resolved_quant
+    # Assign only on a real change: an assignment marks the field as set, and the
+    # MLX trainer reads model_fields_set to tell a written setting from the default.
+    if resolved_quant != cfg.training.quantization:
+        cfg.training.quantization = resolved_quant
 
     # Hardware-fit preflight: refuse (unless --allow-oom-attempt) when the
     # analytical VRAM predictor says the run won't fit. Skips silently on CPU

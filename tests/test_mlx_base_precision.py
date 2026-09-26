@@ -298,3 +298,49 @@ class TestAgainstRealMlx:
         trainable = [name for name, _ in tree_flatten(model.trainable_parameters())]
         assert trainable
         assert all(name.endswith(("lora_a", "lora_b")) for name in trainable)
+
+
+class TestOnlyAWrittenSettingWarns:
+    """The schema default is 4bit: an 8-bit checkpoint under a config that never
+    set ``quantization`` asked for nothing and gets no advice about it."""
+
+    def test_the_default_on_a_different_checkpoint_does_not_warn(self):
+        from soup_cli.utils.mlx import plan_mlx_base_precision
+
+        precision = plan_mlx_base_precision(
+            {"quantization": {"group_size": 64, "bits": 8}}, "4bit", base=_BASE, explicit=False
+        )
+        assert precision.bits == 8
+        assert precision.mismatch is None
+
+    def test_bitnet_gets_no_advice_to_find_a_full_precision_base(self):
+        precision = _plan({"quantization_config": {"quant_method": "bitnet"}}, "4bit")
+        assert "is not applied" in precision.mismatch
+        assert "point base at" not in precision.mismatch
+
+    @pytest.mark.parametrize("written, explicit", [({}, False), ({"quantization": "4bit"}, True)])
+    def test_the_trainer_says_whether_the_setting_was_written(
+        self, tmp_path, monkeypatch, written, explicit
+    ):
+        from soup_cli.config.schema import DataConfig, SoupConfig, TrainingConfig
+        from soup_cli.trainer import mlx_sft
+        from soup_cli.utils import mlx as mlx_utils
+
+        _install_fake_mlx(monkeypatch)
+        seen = {}
+
+        def fake_load(path, quantization, **kwargs):
+            seen.update(kwargs)
+            return _FakeMlxModel(), object(), _plan({}, "4bit")
+
+        monkeypatch.setattr(mlx_utils, "load_mlx_model", fake_load)
+        cfg = SoupConfig(
+            base=_BASE,
+            task="sft",
+            backend="mlx",
+            data=DataConfig(train="./data/train.jsonl", format="chatml"),
+            training=TrainingConfig(**written),
+            output=str(tmp_path),
+        )
+        mlx_sft.MLXSFTTrainerWrapper(cfg).setup({"train": [], "val": []})
+        assert seen == {"explicit": explicit}

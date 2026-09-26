@@ -207,7 +207,7 @@ def _checkpoint_quantization(model_config: dict) -> Optional[dict]:
 
 
 def plan_mlx_base_precision(
-    model_config: dict, quantization: str, *, base: str
+    model_config: dict, quantization: str, *, base: str, explicit: bool = True
 ) -> MlxBasePrecision:
     """Decide the precision the base trains at.
 
@@ -248,20 +248,26 @@ def plan_mlx_base_precision(
     )
     if precision.bits == requested_bits:
         return precision
-    wanted = "full precision" if requested_bits is None else f"{requested_bits}-bit"
-    return replace(
-        precision,
-        mismatch=(
-            f"training.quantization: {quantization} is not applied: {base} is already "
-            f"quantized ({precision.describe()}) and trains at that precision. On MLX "
-            "the setting quantizes a full-precision base; point base at the "
-            f"full-precision model to train at {wanted}."
-        ),
+    # Only a setting the user wrote is worth a warning: the schema default is
+    # ``4bit``, and an unset config pointed at an 8-bit checkpoint asked for nothing.
+    if not explicit:
+        return precision
+    mismatch = (
+        f"training.quantization: {quantization} is not applied: {base} is already "
+        f"quantized ({precision.describe()}) and trains at that precision."
     )
+    # bitnet and other schemes without a bit width have no full-precision sibling.
+    if precision.bits is not None:
+        wanted = "full precision" if requested_bits is None else f"{requested_bits}-bit"
+        mismatch += (
+            " On MLX the setting quantizes a full-precision base; point base at the "
+            f"full-precision model to train at {wanted}."
+        )
+    return replace(precision, mismatch=mismatch)
 
 
 def load_mlx_model(
-    model_path: str, quantization: str = "4bit",
+    model_path: str, quantization: str = "4bit", *, explicit: bool = True,
 ) -> tuple[Any, Any, MlxBasePrecision]:
     """Load a model with ``mlx_lm`` at the precision ``quantization`` asks for.
 
@@ -274,7 +280,9 @@ def load_mlx_model(
     from mlx_lm.utils import quantize_model
 
     model, tokenizer, model_config = load(model_path, lazy=True, return_config=True)
-    precision = plan_mlx_base_precision(model_config, quantization, base=model_path)
+    precision = plan_mlx_base_precision(
+        model_config, quantization, base=model_path, explicit=explicit
+    )
     if precision.source == "load_time":
         model, _ = quantize_model(
             model,
