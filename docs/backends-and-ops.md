@@ -155,6 +155,12 @@ The decision comes from a live MPS allocation probe rather than a macOS version
 guess. CPU and an unavailable or older MPS runtime remain in FP32; FP16 is not
 selected on MPS.
 
+On Apple Silicon the CLI sets `HF_DEACTIVATE_ASYNC_LOAD=1` unless it is already
+set, so transformers loads checkpoint weights on one thread. Its default
+four-thread loader segfaults loading onto MPS with a dtype cast (transformers
+5.17), which is what a bf16 checkpoint under `soup infer` or `soup chat` does.
+Export `HF_DEACTIVATE_ASYNC_LOAD=0` to get the parallel loader back.
+
 For BF16 checkpoints, resident SFT, DPO, GRPO, and reward-model runs preserve
 the frozen base weights in BF16 while keeping LoRA parameters in FP32. PRM uses
 BF16 autocast but deliberately retains FP32 master weights: loading its

@@ -108,4 +108,9 @@ class TestOnRealMps:
         fixed its parallel MPS loader: drop the default in
         ``utils/gpu.serialize_weight_loading_on_apple_silicon`` and this test."""
         result = self._infer(tmp_path, **{_ENV: "0"})
-        assert result.returncode != 0, "parallel loading onto MPS no longer crashes"
+        # A segfault specifically: any other failure (no network, a renamed option)
+        # would also be non-zero and prove nothing about the loader.
+        assert result.returncode in (-11, 139), (
+            f"expected a segfault, got exit {result.returncode}: parallel loading onto "
+            "MPS may no longer crash\n" + result.stderr[-2000:]
+        )
