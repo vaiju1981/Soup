@@ -145,6 +145,26 @@ what ran is recoverable from the output directory.
 
 `--resume auto` finds mlx-lm's step-numbered `NNNNNNN_adapters.safetensors` checkpoints and warm-starts the LoRA weights from them ([#634](https://github.com/MakazhanAlpamys/Soup/issues/634)). This restores adapter weights only, not training state: mlx-lm's LoRA trainer exposes no optimizer state or step count, so training restarts from step 0 regardless of how far the checkpoint got. See [Resume Training](#resume-training) below for the MLX-specific checkpoint shape.
 
+#### After training
+
+An MLX run writes mlx-lm's adapter format (`adapters.safetensors`, and an
+`adapter_config.json` naming the base under `model`), not PEFT's. Two commands
+take it directly:
+
+```bash
+soup chat --model ./output                      # loads base + adapter through mlx-lm
+soup merge --adapter ./output --output ./merged # fuses and dequantizes; --dtype float16 by default
+```
+
+The merged directory is a standard Hugging Face model, and it is what
+`soup push`, `soup export`, `soup infer` and `soup serve` take. Given the adapter
+directory itself, those four refuse it and print the merge command; before, each
+failed with "Cannot detect base model", or for `push`, "does not look like a
+valid model". `soup merge` does what `mlx_lm.fuse --dequantize` does without
+calling it: with mlx-lm 0.31.3 and huggingface_hub 1.33, `mlx_lm.fuse --model
+<repo id>` stops with `IncompleteSnapshotError` on a model `mlx_lm.load`
+downloaded, because that download fetched only the files mlx-lm needs.
+
 ### Transformers on MPS
 
 The regular `backend: transformers` path can run more than MLX's SFT-only

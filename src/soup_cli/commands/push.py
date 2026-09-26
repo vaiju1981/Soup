@@ -12,6 +12,8 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from soup_cli.utils.mlx_adapter import exit_if_mlx_adapter
+
 console = Console()
 
 # Files that should exist in a valid LoRA adapter directory
@@ -122,6 +124,7 @@ def push(
     # multi-line message can't pollute HF commit history.
     commit_message = commit_message.splitlines()[0][:200] if commit_message else ""
 
+    exit_if_mlx_adapter(model_path, "push", console)
     files_in_dir = {f.name for f in model_path.iterdir() if f.is_file()}
     is_adapter = ADAPTER_FILES.issubset(files_in_dir) or ADAPTER_FILES_ALT.issubset(files_in_dir)
 

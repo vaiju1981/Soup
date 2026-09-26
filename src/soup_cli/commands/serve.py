@@ -19,6 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from rich.console import Console
 from rich.panel import Panel
 
+from soup_cli.utils.mlx_adapter import exit_if_mlx_adapter
 from soup_cli.utils.terminal import for_terminal
 
 logger = logging.getLogger(__name__)
@@ -667,6 +668,7 @@ def serve(
     if not model_path.exists():
         console.print(f"[red]Model path not found: {model_path}[/]")
         raise typer.Exit(1)
+    exit_if_mlx_adapter(model_path, "serve", console)
 
     # Detect adapter
     adapter_config_path = model_path / "adapter_config.json"

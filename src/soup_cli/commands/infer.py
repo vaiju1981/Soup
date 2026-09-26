@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from soup_cli.utils.mlx_adapter import exit_if_mlx_adapter
 from soup_cli.utils.terminal import for_terminal
 
 console = Console()
@@ -207,6 +208,8 @@ def infer(
             f"[dim]Local path not found; treating {model_ref!r} as a HF repo id.[/]"
         )
     model_target = model_ref
+    if model_kind == "local":
+        exit_if_mlx_adapter(model_target, "infer", console)
 
     # Read prompts
     prompts = _read_prompts(input_path)

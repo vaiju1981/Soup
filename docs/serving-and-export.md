@@ -41,6 +41,9 @@ soup merge --adapter ./output --output ./merged
 soup merge --adapter ./output --base meta-llama/Llama-3.1-8B --dtype bfloat16
 ```
 
+An adapter trained with `backend: mlx` merges the same way, through mlx-lm
+rather than PEFT; see [After training](backends-and-ops.md#after-training).
+
 
 ## Export to GGUF
 

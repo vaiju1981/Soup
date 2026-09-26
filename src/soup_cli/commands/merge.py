@@ -8,6 +8,9 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from soup_cli.utils.mlx_adapter import MlxAdapter, find_mlx_adapter, merge_mlx_adapter
+from soup_cli.utils.terminal import for_terminal
+
 console = Console()
 
 
@@ -119,8 +122,10 @@ def merge(
         raise typer.Exit(1)
 
     # --- Resolve base model ---
+    # An adapter trained with backend: mlx names its base under `model`.
+    mlx_adapter = find_mlx_adapter(adapter_path)
     if not base:
-        base = _detect_base_model(adapter_config_path)
+        base = mlx_adapter.base if mlx_adapter else _detect_base_model(adapter_config_path)
         if not base:
             console.print(
                 "[red]Cannot detect base model from adapter_config.json.[/]\n"
@@ -145,6 +150,11 @@ def merge(
             title="Merge Plan",
         )
     )
+
+    if mlx_adapter is not None:
+        _merge_mlx(mlx_adapter, base, output_path, dtype, save_format_canonical)
+        _report_merge_complete(output_path)
+        return
 
     # --- Merge ---
     try:
@@ -240,7 +250,33 @@ def merge(
         console.print(f"[red]Merge failed: {exc}[/]")
         raise typer.Exit(1)
 
-    # Calculate output size
+    _report_merge_complete(output_path)
+
+
+def _merge_mlx(
+    adapter: MlxAdapter, base: str, output_path: Path, dtype: str, save_format: str
+) -> None:
+    """Fuse an adapter trained with backend: mlx through mlx-lm, not PEFT."""
+    if save_format != "fp16":
+        console.print(
+            f"[red]--save-format {save_format} writes a bitsandbytes checkpoint, which "
+            "needs a PEFT adapter; an MLX adapter merges to --dtype only.[/]"
+        )
+        raise typer.Exit(2)
+
+    console.print(f"[dim]Fusing MLX adapter into {for_terminal(base)}...[/]")
+    try:
+        merge_mlx_adapter(adapter, base, output_path, dtype)
+    except ImportError as exc:
+        console.print(f"[red]Missing dependency: {for_terminal(exc)}[/]")
+        console.print('Run: [bold]pip install "soup-cli\\[mlx]"[/] (Apple Silicon)')
+        raise typer.Exit(1)
+    except Exception as exc:
+        console.print(f"[red]Merge failed: {for_terminal(exc)}[/]")
+        raise typer.Exit(1)
+
+
+def _report_merge_complete(output_path: Path) -> None:
     total_size = sum(f.stat().st_size for f in output_path.rglob("*") if f.is_file())
     size_str = _format_size(total_size)
 

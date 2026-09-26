@@ -70,6 +70,26 @@ def _nondefault_unwired_training_settings(training_config) -> list[str]:
     return enabled_flags + changed_tunables
 
 
+def _next_steps(output_dir: str, *, backend: str) -> str:
+    """The follow-up commands the summary suggests, only ones that take this output.
+
+    An MLX adapter loads in ``soup chat`` and ``soup merge``; push and export
+    take the merged model, whose own summary suggests them.
+    """
+    if backend == "mlx":
+        return (
+            f"Quick test:  [bold]soup chat --model {output_dir}[/]\n"
+            f"Merge LoRA:  [bold]soup merge --adapter {output_dir}[/] "
+            "(then push or export the merged model)"
+        )
+    return (
+        f"Quick test:  [bold]soup chat --model {output_dir}[/]\n"
+        f"Push to HF:  [bold]soup push --model {output_dir}[/]\n"
+        f"Merge LoRA:  [bold]soup merge --adapter {output_dir}[/]\n"
+        f"Export GGUF: [bold]soup export --model {output_dir}[/]"
+    )
+
+
 def _format_training_complete_loss(result: dict) -> str:
     """Render only a loss comparison that the trainer actually measured."""
     summary_kind = result.get("loss_summary_kind")
@@ -1807,10 +1827,7 @@ def train(
             f"Duration: [bold]{result['duration']}[/]\n"
             f"Output: [bold]{result['output_dir']}[/]\n"
             f"Run ID: [bold]{run_id}[/]\n\n"
-            f"Quick test:  [bold]soup chat --model {result['output_dir']}[/]\n"
-            f"Push to HF:  [bold]soup push --model {result['output_dir']}[/]\n"
-            f"Merge LoRA:  [bold]soup merge --adapter {result['output_dir']}[/]\n"
-            f"Export GGUF: [bold]soup export --model {result['output_dir']}[/]\n"
+            f"{_next_steps(result['output_dir'], backend=cfg.backend)}\n"
             f"Run details: [bold]soup runs show {run_id}[/]",
             title="[bold green]Training Complete![/]",
         )

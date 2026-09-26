@@ -13,6 +13,8 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 
+from soup_cli.utils.mlx_adapter import exit_if_mlx_adapter
+
 console = Console()
 
 SUPPORTED_FORMATS = (
@@ -163,6 +165,7 @@ def export(
     if not model_path.exists():
         console.print(f"[red]Model path not found: {model_path}[/]")
         raise typer.Exit(1)
+    exit_if_mlx_adapter(model_path, "export", console)
 
     if fmt not in SUPPORTED_FORMATS:
         console.print(

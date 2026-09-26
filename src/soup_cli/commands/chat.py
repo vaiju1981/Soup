@@ -8,6 +8,9 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from soup_cli.utils.mlx_adapter import find_mlx_adapter
+from soup_cli.utils.terminal import for_terminal
+
 console = Console()
 
 
@@ -91,9 +94,19 @@ def chat(
     adapter_config_path = model_path / "adapter_config.json"
     is_adapter = adapter_config_path.exists()
 
+    # An adapter trained with backend: mlx is in mlx-lm's format, not PEFT's,
+    # and names its base under `model`. mlx-lm loads it; PEFT cannot.
+    mlx_adapter = find_mlx_adapter(model_path) if is_adapter else None
+    if mlx_adapter is not None and device not in (None, "mlx"):
+        console.print(
+            f"[red]{for_terminal(model_path)} is an MLX adapter and runs on "
+            f"--device mlx only, not {for_terminal(device)}.[/]"
+        )
+        raise typer.Exit(1)
+
     # Resolve base model
     if is_adapter and not base_model:
-        base_model = _detect_base_model(adapter_config_path)
+        base_model = mlx_adapter.base if mlx_adapter else _detect_base_model(adapter_config_path)
         if not base_model:
             console.print(
                 "[red]Cannot detect base model from adapter_config.json.[/]\n"
@@ -102,7 +115,9 @@ def chat(
             raise typer.Exit(1)
 
     # Detect device
-    if not device:
+    if mlx_adapter is not None:
+        device = "mlx"
+    elif not device:
         from soup_cli.utils.gpu import detect_device
 
         device, _ = detect_device()
@@ -135,13 +150,16 @@ def chat(
     )
 
     # Load model + tokenizer
-    model_obj, tokenizer = _load_model(
-        model_path=str(model_path),
-        base_model=base_model,
-        is_adapter=is_adapter,
-        device=device,
-        trust_remote_code=resolved_trust,
-    )
+    if mlx_adapter is not None:
+        model_obj, tokenizer = _load_mlx_adapter(mlx_adapter.path, base_model)
+    else:
+        model_obj, tokenizer = _load_model(
+            model_path=str(model_path),
+            base_model=base_model,
+            is_adapter=is_adapter,
+            device=device,
+            trust_remote_code=resolved_trust,
+        )
 
     console.print("[bold green]Model loaded![/] Type your message. Commands:")
     console.print("  [dim]/quit[/]  - exit chat")
@@ -187,12 +205,19 @@ def chat(
         history.append({"role": "user", "content": user_input})
 
         # Generate response
-        response = _generate(
-            model_obj, tokenizer, history,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            device=device,
-        )
+        if mlx_adapter is not None:
+            response = _generate_mlx(
+                model_obj, tokenizer, history,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        else:
+            response = _generate(
+                model_obj, tokenizer, history,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                device=device,
+            )
 
         history.append({"role": "assistant", "content": response})
         console.print(f"[bold green]Assistant:[/] {response}\n")
@@ -249,6 +274,41 @@ def _load_model(
 
     model_obj.eval()
     return model_obj, tokenizer
+
+
+def _load_mlx_adapter(adapter_path: Path, base_model: str):
+    """Load ``base_model`` with the MLX adapter at ``adapter_path`` applied."""
+    try:
+        from mlx_lm import load
+    except ImportError as exc:
+        console.print(
+            f"[red]{for_terminal(adapter_path)} is an MLX adapter; chatting with it "
+            "needs mlx-lm on Apple Silicon.[/]\n"
+            'Run: [bold]pip install "soup-cli\\[mlx]"[/]'
+        )
+        raise typer.Exit(1) from exc
+
+    console.print(f"[dim]Loading {for_terminal(base_model)} with MLX adapter...[/]")
+    return load(base_model, adapter_path=str(adapter_path))
+
+
+def _generate_mlx(
+    model,
+    tokenizer,
+    messages: list[dict],
+    max_tokens: int = 512,
+    temperature: float = 0.7,
+) -> str:
+    """Generate a response through mlx-lm, sampling as :func:`_generate` does."""
+    from mlx_lm import generate
+    from mlx_lm.sample_utils import make_sampler
+
+    prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    # temp 0 is greedy in both; top_p 0.9 matches the transformers path when sampling.
+    sampler = make_sampler(temp=temperature, top_p=0.9 if temperature > 0 else 0.0)
+    return generate(
+        model, tokenizer, prompt=prompt, max_tokens=max_tokens, sampler=sampler, verbose=False
+    ).strip()
 
 
 def _generate(
