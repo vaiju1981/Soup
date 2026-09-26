@@ -97,6 +97,21 @@ def resolve_device_map(device: str):
         return "auto"
 
 
+def load_device_map(requested_device: Optional[str]):
+    """``device_map`` for loading a model to run, from what ``--device`` asked for.
+
+    No ``--device`` keeps ``"auto"``: transformers places the model, sharding it
+    across GPUs when there are several. An explicit device pins the whole model
+    there. Passing ``"auto"`` for that too is how ``--device cpu`` on a Mac
+    loaded onto MPS while the panel said cpu. :func:`resolve_device_map` is the
+    training rule and gives ``"auto"`` for every accelerator, so it would do the
+    same to ``--device mps`` or ``--device cuda:1``.
+    """
+    if not requested_device:
+        return "auto"
+    return {"": requested_device}
+
+
 def detect_device(backend: Optional[str] = None) -> tuple[str, str]:
     """Detect available accelerator device with full Apple Silicon runtime disambiguation.
 

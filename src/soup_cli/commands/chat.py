@@ -101,7 +101,11 @@ def chat(
             )
             raise typer.Exit(1)
 
-    # Detect device
+    # Only an explicit --device decides where the model loads (load_device_map);
+    # the detected one is for display and generation.
+    from soup_cli.utils.gpu import load_device_map
+
+    device_map = load_device_map(device)
     if not device:
         from soup_cli.utils.gpu import detect_device
 
@@ -139,7 +143,7 @@ def chat(
         model_path=str(model_path),
         base_model=base_model,
         is_adapter=is_adapter,
-        device=device,
+        device_map=device_map,
         trust_remote_code=resolved_trust,
     )
 
@@ -212,7 +216,7 @@ def _load_model(
     model_path: str,
     base_model: Optional[str],
     is_adapter: bool,
-    device: str,
+    device_map,
     trust_remote_code: bool = False,
 ):
     """Load model and tokenizer. Supports LoRA adapters and full models."""
@@ -233,7 +237,7 @@ def _load_model(
         base = AutoModelForCausalLM.from_pretrained(
             base_model,
             trust_remote_code=trust_remote_code,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=torch.float16,
         )
         console.print(f"[dim]Loading LoRA adapter: {model_path}...[/]")
@@ -243,7 +247,7 @@ def _load_model(
         model_obj = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=trust_remote_code,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=torch.float16,
         )
 

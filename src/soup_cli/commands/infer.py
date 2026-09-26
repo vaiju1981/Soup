@@ -215,7 +215,11 @@ def infer(
         console.print("[dim]Expected JSONL with {\"prompt\": \"...\"} or plain text lines.[/]")
         raise typer.Exit(1)
 
-    # Detect device
+    # Only an explicit --device decides where the model loads (load_device_map);
+    # the detected one is for display and generation.
+    from soup_cli.utils.gpu import load_device_map
+
+    device_map = load_device_map(device)
     if not device:
         from soup_cli.utils.gpu import detect_device
 
@@ -236,7 +240,7 @@ def infer(
     # Load model — gate trust_remote_code via the v0.36.0 helper.
     console.print("[dim]Loading model...[/]")
     model_obj, tokenizer = _load_model(
-        model_target, base, device, trust_remote_code, is_local=(model_kind == "local"),
+        model_target, base, device_map, trust_remote_code, is_local=(model_kind == "local"),
     )
     console.print("[green]Model loaded.[/]\n")
 
@@ -633,7 +637,7 @@ def _read_prompts(path: Path) -> list[str]:
 def _load_model(
     model_path: str,
     base_model: Optional[str],
-    device: str,
+    device_map,
     trust_remote_code: bool = False,
     is_local: Optional[bool] = None,
 ) -> tuple:
@@ -691,7 +695,7 @@ def _load_model(
         base_obj = AutoModelForCausalLM.from_pretrained(
             base_model,
             trust_remote_code=trc,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=torch.float16,
         )
         model_obj = PeftModel.from_pretrained(base_obj, model_path)
@@ -699,7 +703,7 @@ def _load_model(
         model_obj = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=trc,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=torch.float16,
         )
 

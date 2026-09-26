@@ -215,7 +215,7 @@ def bench(
     start_load = time.time()
     try:
         model_obj, tokenizer = _load_model(
-            model_target, base, device, is_local=(model_kind == "local")
+            model_target, base, "auto", is_local=(model_kind == "local")
         )
     except typer.Exit:
         # typer.Exit subclasses RuntimeError, so the broad except below would

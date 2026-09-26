@@ -682,7 +682,11 @@ def serve(
             )
             raise typer.Exit(1)
 
-    # Detect device (only for transformers backend)
+    # Only an explicit --device decides where a transformers model loads
+    # (load_device_map); the detected one is for display and generation.
+    from soup_cli.utils.gpu import load_device_map
+
+    device_map = load_device_map(device)
     if not device and backend == "transformers":
         from soup_cli.utils.gpu import detect_device
 
@@ -845,7 +849,7 @@ def serve(
                 model_path=str(model_path),
                 base_model=base_model,
                 is_adapter=is_adapter,
-                device=device,
+                device_map=device_map,
                 trust_remote_code=resolved_trust,
                 kv_cache_dtype=(
                     resolved_kv_runtime.model_dtype if resolved_kv_runtime else None
@@ -949,7 +953,7 @@ def serve(
                     border_style="yellow",
                 )
             )
-            draft_model = _load_draft_model(speculative_model, device)
+            draft_model = _load_draft_model(speculative_model, device, device_map)
             draft_tokenizer = _load_draft_tokenizer(
                 speculative_model, trust_remote_code=resolved_trust
             )
@@ -1336,7 +1340,7 @@ def _load_model(
     model_path: str,
     base_model: Optional[str],
     is_adapter: bool,
-    device: str,
+    device_map,
     trust_remote_code: bool = False,
     kv_cache_dtype: Optional[str] = None,
 ):
@@ -1368,7 +1372,7 @@ def _load_model(
         base = AutoModelForCausalLM.from_pretrained(
             base_model,
             trust_remote_code=trust_remote_code,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=load_dtype,
         )
         console.print(f"[dim]Loading LoRA adapter: {model_path}...[/]")
@@ -1378,7 +1382,7 @@ def _load_model(
         model_obj = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=trust_remote_code,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=load_dtype,
         )
 
@@ -1447,8 +1451,13 @@ def _adapter_scope(model, lock, names, requested, active):
             yield
 
 
-def _load_draft_model(speculative_model: str, device: str):
-    """Load a smaller draft model for speculative decoding."""
+def _load_draft_model(speculative_model: str, device: str, device_map=None):
+    """Load a smaller draft model for speculative decoding.
+
+    ``serve`` passes the main model's ``device_map``, since speculative decoding
+    needs both on one device; without one the draft is placed by ``device``.
+    ``device`` is where they run, which also picks the dtype.
+    """
     import os
     import re
 
@@ -1474,9 +1483,11 @@ def _load_draft_model(speculative_model: str, device: str):
         assert_safe_top_level_weights(speculative_model)
 
     console.print(f"[dim]Loading draft model: {escape(speculative_model)}...[/]")
+    if device_map is None:
+        device_map = "cpu" if device == "cpu" else "auto"
     draft = AutoModelForCausalLM.from_pretrained(
         speculative_model,
-        device_map="auto" if device != "cpu" else "cpu",
+        device_map=device_map,
         torch_dtype=torch.float16 if device != "cpu" else torch.float32,
     )
     draft.eval()

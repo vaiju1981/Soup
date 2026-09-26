@@ -190,6 +190,8 @@ soup infer --model ./output --input prompts.jsonl --output results.jsonl \
 
 Output is JSONL with `prompt`, `response`, and `tokens_generated` fields. Shows a progress bar and throughput summary.
 
+`--device cpu` / `mps` / `cuda` / `cuda:1` loads the whole model onto that device, here and in `soup chat`, `soup diff` and `soup serve`. Without `--device`, transformers places the model (`device_map="auto"`), sharding it across GPUs when there are several. Before this, those commands loaded with `device_map="auto"` whatever `--device` said, so `--device cpu` on a Mac still ran on MPS.
+
 
 ## Inference Benchmarking
 

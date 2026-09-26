@@ -95,7 +95,11 @@ def diff(
         console.print("[red]No prompts provided. Use --prompts or --prompt.[/]")
         raise typer.Exit(1)
 
-    # Detect device
+    # Only an explicit --device decides where the model loads (load_device_map);
+    # the detected one is for display and generation.
+    from soup_cli.utils.gpu import load_device_map
+
+    device_map = load_device_map(device)
     if not device:
         from soup_cli.utils.gpu import detect_device
 
@@ -114,11 +118,11 @@ def diff(
     # Load models
     console.print("[dim]Loading Model A...[/]")
     model_obj_a, tokenizer_a = _load_model(
-        str(path_a), base_a, device, trust_remote_code,
+        str(path_a), base_a, device_map, trust_remote_code,
     )
     console.print("[dim]Loading Model B...[/]")
     model_obj_b, tokenizer_b = _load_model(
-        str(path_b), base_b, device, trust_remote_code,
+        str(path_b), base_b, device_map, trust_remote_code,
     )
     console.print("[green]Both models loaded.[/]\n")
 
@@ -214,7 +218,7 @@ def _collect_prompts(prompts_file: Optional[str], prompt_args: Optional[list[str
 def _load_model(
     model_path: str,
     base_model: Optional[str],
-    device: str,
+    device_map,
     trust_remote_code: bool = False,
 ):
     """Load a model and tokenizer."""
@@ -261,7 +265,7 @@ def _load_model(
         base = AutoModelForCausalLM.from_pretrained(
             base_model,
             trust_remote_code=trc,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=torch.float16,
         )
         model_obj = PeftModel.from_pretrained(base, model_path)
@@ -269,7 +273,7 @@ def _load_model(
         model_obj = AutoModelForCausalLM.from_pretrained(
             model_path,
             trust_remote_code=trc,
-            device_map="auto",
+            device_map=device_map,
             torch_dtype=torch.float16,
         )
 
