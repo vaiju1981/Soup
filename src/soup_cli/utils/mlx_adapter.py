@@ -19,6 +19,7 @@ commands refuse it, naming that merge as the step to run first.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -64,7 +65,13 @@ def unsupported_message(adapter: MlxAdapter, command: str) -> str:
     )
 
 
-def merge_mlx_adapter(adapter: MlxAdapter, base: str, output_dir: Path, dtype: str) -> None:
+def merge_mlx_adapter(
+    adapter: MlxAdapter,
+    base: str,
+    output_dir: Path,
+    dtype: str,
+    trust_remote_code: bool = False,
+) -> None:
     """Fuse ``adapter`` into ``base`` and save a dequantized model at ``output_dir``.
 
     These are ``mlx_lm.fuse --dequantize``'s steps. ``mlx_lm.utils.save`` is not
@@ -72,7 +79,11 @@ def merge_mlx_adapter(adapter: MlxAdapter, base: str, output_dir: Path, dtype: s
     ``local_files_only=True``, and huggingface_hub 1.x refuses the snapshot
     ``mlx_lm.load`` itself downloaded, because that download fetched only the
     files mlx-lm needs. ``mlx_lm.fuse`` fails the same way. The three public
-    helpers ``save`` wraps are called directly instead.
+    helpers ``save`` wraps are called directly instead, and the two kinds of
+    file ``save`` also copies from the base are copied here: ``generation_config.json``
+    (for instruct models it carries the end-of-turn ids, without which a
+    transformers ``generate`` on the merged model runs past the turn) and any
+    custom modeling ``*.py``.
 
     ``dtype`` is ``float16``, ``bfloat16`` or ``float32``, and is also written
     to the config so a loader's ``dtype="auto"`` gets what is on disk.
@@ -82,7 +93,12 @@ def merge_mlx_adapter(adapter: MlxAdapter, base: str, output_dir: Path, dtype: s
     from mlx_lm import load
     from mlx_lm.utils import dequantize_model, save_config, save_model
 
-    model, tokenizer, config = load(base, adapter_path=str(adapter.path), return_config=True)
+    model, tokenizer, config = load(
+        base,
+        adapter_path=str(adapter.path),
+        return_config=True,
+        tokenizer_config={"trust_remote_code": trust_remote_code},
+    )
     fused = [
         (name, module.fuse(dequantize=True))
         for name, module in model.named_modules()
@@ -104,6 +120,27 @@ def merge_mlx_adapter(adapter: MlxAdapter, base: str, output_dir: Path, dtype: s
     save_model(output_dir, model, donate_model=True)
     save_config(config, config_path=output_dir / "config.json")
     tokenizer.save_pretrained(str(output_dir))
+    for source in _base_files_to_copy(base):
+        shutil.copy(source, output_dir / source.name)
+
+
+def _base_files_to_copy(base: str) -> list[Path]:
+    """``generation_config.json`` and ``*.py`` from ``base``, as mlx_lm's own save copies.
+
+    A hub id resolves to its local snapshot. ``allow_patterns`` fetches only
+    these files, usually already cached by ``mlx_lm.load``, and without
+    ``local_files_only`` there is no snapshot-completeness check to trip.
+    """
+    root = Path(base)
+    if not root.is_dir():
+        from huggingface_hub import snapshot_download
+
+        root = Path(
+            snapshot_download(base, allow_patterns=["generation_config.json", "*.py"])
+        )
+    return sorted(
+        path for pattern in ("generation_config.json", "*.py") for path in root.glob(pattern)
+    )
 
 
 def exit_if_mlx_adapter(model_path: "Path | str", command: str, console: "Console") -> None:

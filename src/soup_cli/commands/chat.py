@@ -29,7 +29,7 @@ def chat(
     ),
     device: Optional[str] = typer.Option(
         None,
-        help="Device: cuda, mps, cpu. Auto-detected if not set.",
+        help="Device: cuda, mps, cpu, or mlx (MLX adapters). Auto-detected if not set.",
     ),
     max_tokens: int = typer.Option(
         512,
@@ -151,7 +151,7 @@ def chat(
 
     # Load model + tokenizer
     if mlx_adapter is not None:
-        model_obj, tokenizer = _load_mlx_adapter(mlx_adapter.path, base_model)
+        model_obj, tokenizer = _load_mlx_adapter(mlx_adapter.path, base_model, resolved_trust)
     else:
         model_obj, tokenizer = _load_model(
             model_path=str(model_path),
@@ -276,7 +276,7 @@ def _load_model(
     return model_obj, tokenizer
 
 
-def _load_mlx_adapter(adapter_path: Path, base_model: str):
+def _load_mlx_adapter(adapter_path: Path, base_model: str, trust_remote_code: bool = False):
     """Load ``base_model`` with the MLX adapter at ``adapter_path`` applied."""
     try:
         from mlx_lm import load
@@ -289,7 +289,11 @@ def _load_mlx_adapter(adapter_path: Path, base_model: str):
         raise typer.Exit(1) from exc
 
     console.print(f"[dim]Loading {for_terminal(base_model)} with MLX adapter...[/]")
-    return load(base_model, adapter_path=str(adapter_path))
+    return load(
+        base_model,
+        adapter_path=str(adapter_path),
+        tokenizer_config={"trust_remote_code": trust_remote_code},
+    )
 
 
 def _generate_mlx(

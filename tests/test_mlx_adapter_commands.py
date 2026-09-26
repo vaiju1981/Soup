@@ -91,9 +91,11 @@ class TestTheRefusalNamesTheWayForward:
             ["export", "--model", "out"],
             ["infer", "--model", "out", "--input", "p.jsonl", "--output", "o.jsonl"],
             ["serve", "--model", "out"],
+            ["infer", "--model", "out", "--input", "p.jsonl", "--output", "o.jsonl",
+             "--task", "asr"],
             ["push", "--model", "out", "--repo", "me/model"],
         ],
-        ids=["export", "infer", "serve", "push"],
+        ids=["export", "infer", "serve", "infer-asr", "push"],
     )
     def test_each_command_refuses_with_the_merge_step(self, tmp_path, monkeypatch, argv):
         monkeypatch.chdir(tmp_path)
@@ -135,8 +137,9 @@ class TestChatLoadsAnMlxAdapterThroughMlxLm:
 
         calls: dict = {"generated": []}
 
-        def load_mlx(adapter_path, base_model):
+        def load_mlx(adapter_path, base_model, trust_remote_code=False):
             calls["mlx_load"] = (Path(adapter_path), base_model)
+            calls["trust"] = trust_remote_code
             return "model", "tokenizer"
 
         def generate_mlx(model, tokenizer, messages, **kwargs):
@@ -171,6 +174,14 @@ class TestChatLoadsAnMlxAdapterThroughMlxLm:
         )
         assert result.exit_code == 0, result.output
         assert calls["mlx_load"] == (adapter, "./local-base")
+
+    def test_trust_remote_code_reaches_the_mlx_loader(self, tmp_path, calls):
+        adapter = _mlx_adapter(tmp_path / "out")
+        result = runner.invoke(
+            app, ["chat", "--model", str(adapter), "--trust-remote-code"], input="/quit\n"
+        )
+        assert result.exit_code == 0, result.output
+        assert calls["trust"] is True
 
     def test_a_non_mlx_device_is_refused(self, tmp_path, calls):
         adapter = _mlx_adapter(tmp_path / "out")
@@ -218,7 +229,7 @@ class TestMergeFusesAnMlxAdapterThroughMlxLm:
         _mlx_adapter(tmp_path / "out")
         seen = {}
 
-        def fake_merge(adapter, base, output_dir, dtype):
+        def fake_merge(adapter, base, output_dir, dtype, trust_remote_code):
             seen.update(adapter=adapter.path, base=base, output=output_dir, dtype=dtype)
             output_dir.mkdir()
             (output_dir / "model.safetensors").write_bytes(b"x")
@@ -246,6 +257,7 @@ class TestMergeFusesAnMlxAdapterThroughMlxLm:
         result = runner.invoke(app, ["merge", "--adapter", "out", "--save-format", "4bit"])
         assert result.exit_code == 2
         assert "merges to --dtype only" in " ".join(strip_ansi(result.output).split())
+        assert "Merge Plan" not in result.output, "refuse before announcing a plan"
 
     def test_a_merge_error_is_reported_not_raised(self, tmp_path, monkeypatch):
         from soup_cli.commands import merge
@@ -340,6 +352,8 @@ class TestMergeAgainstRealMlx:
         directory.mkdir()
         save_model(directory, model)
         save_config(config, config_path=directory / "config.json")
+        (directory / "generation_config.json").write_text(json.dumps({"eos_token_id": [1, 2]}))
+        (directory / "custom_modeling.py").write_text("# custom code\n")
         vocab = {f"t{i}": i for i in range(128)}
         tokenizer = Tokenizer(models.WordLevel(vocab=vocab, unk_token="t0"))
         PreTrainedTokenizerFast(tokenizer_object=tokenizer, unk_token="t0").save_pretrained(
@@ -391,6 +405,9 @@ class TestMergeAgainstRealMlx:
         )
 
         config = json.loads((tmp_path / "merged" / "config.json").read_text())
+        generation = json.loads((tmp_path / "merged" / "generation_config.json").read_text())
+        assert generation["eos_token_id"] == [1, 2], "end-of-turn ids must survive the merge"
+        assert (tmp_path / "merged" / "custom_modeling.py").is_file()
         assert "quantization" not in config and "quantization_config" not in config
         assert config["torch_dtype"] == "float16"
         merged, _ = load(str(tmp_path / "merged"))

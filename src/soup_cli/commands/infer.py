@@ -164,6 +164,8 @@ def infer(
         console.print(f"[red]Input file not found: {input_path}[/]")
         raise typer.Exit(1)
 
+    exit_if_mlx_adapter(model, "infer", console)
+
     # v0.71.32 — ASR (Whisper) transcription branch. Diverts before the chat
     # model-resolution path; _infer_asr owns its own Whisper load + output.
     if task == "asr":
@@ -208,8 +210,6 @@ def infer(
             f"[dim]Local path not found; treating {model_ref!r} as a HF repo id.[/]"
         )
     model_target = model_ref
-    if model_kind == "local":
-        exit_if_mlx_adapter(model_target, "infer", console)
 
     # Read prompts
     prompts = _read_prompts(input_path)

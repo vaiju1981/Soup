@@ -172,6 +172,10 @@ jobs:
         # execute them. Without this step, replacing the whole MLX per-row loss
         # with a constant 0.0 left the suite green (#1018 review).
         run: pytest -o addopts= -q tests/test_rewind_mlx.py
+      - name: Run the real MLX adapter merge tests
+        # Same reason: the 3x3 matrix skips them for want of mlx, so without this
+        # step the fuse/dequantize path is covered only by mocks.
+        run: pytest -o addopts= -q tests/test_mlx_adapter_commands.py -k TestMergeAgainstRealMlx
   torchao-contract:
     # #826: every torchao class Soup names is resolved against the REAL package
     # here. The 3x3 matrix cannot do it -- `torchao` is not in `[dev]`, so those

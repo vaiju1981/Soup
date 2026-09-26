@@ -141,6 +141,13 @@ def merge(
 
     output_path = Path(output)
 
+    if mlx_adapter is not None and save_format_canonical != "fp16":
+        console.print(
+            f"[red]--save-format {save_format_canonical} writes a bitsandbytes checkpoint, "
+            "which needs a PEFT adapter; an MLX adapter merges to --dtype only.[/]"
+        )
+        raise typer.Exit(2)
+
     console.print(
         Panel(
             f"Adapter: [bold]{adapter_path}[/]\n"
@@ -152,7 +159,7 @@ def merge(
     )
 
     if mlx_adapter is not None:
-        _merge_mlx(mlx_adapter, base, output_path, dtype, save_format_canonical)
+        _merge_mlx(mlx_adapter, base, output_path, dtype, trust_remote_code)
         _report_merge_complete(output_path)
         return
 
@@ -254,19 +261,12 @@ def merge(
 
 
 def _merge_mlx(
-    adapter: MlxAdapter, base: str, output_path: Path, dtype: str, save_format: str
+    adapter: MlxAdapter, base: str, output_path: Path, dtype: str, trust_remote_code: bool
 ) -> None:
     """Fuse an adapter trained with backend: mlx through mlx-lm, not PEFT."""
-    if save_format != "fp16":
-        console.print(
-            f"[red]--save-format {save_format} writes a bitsandbytes checkpoint, which "
-            "needs a PEFT adapter; an MLX adapter merges to --dtype only.[/]"
-        )
-        raise typer.Exit(2)
-
     console.print(f"[dim]Fusing MLX adapter into {for_terminal(base)}...[/]")
     try:
-        merge_mlx_adapter(adapter, base, output_path, dtype)
+        merge_mlx_adapter(adapter, base, output_path, dtype, trust_remote_code)
     except ImportError as exc:
         console.print(f"[red]Missing dependency: {for_terminal(exc)}[/]")
         console.print('Run: [bold]pip install "soup-cli\\[mlx]"[/] (Apple Silicon)')
