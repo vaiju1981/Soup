@@ -157,10 +157,11 @@ def resolve_quantization(
     """Decide whether ``quantization`` should be kept, downgraded, or refused.
 
     This is the explicit decision the maintainer requested in #423: MLX 4-bit
-    is a genuinely different mechanism from bitsandbytes NF4.  An
-    ``mlx-community`` checkpoint is *already* quantized, so ``quantization``
-    is forwarded to ``load_mlx_model`` as-is.  8-bit on MLX is rejected
-    separately by ``MLXTrainer._check_unsupported()``.
+    is a genuinely different mechanism from bitsandbytes NF4, so
+    ``quantization`` is forwarded to ``load_mlx_model`` as-is. That applies
+    it with MLX's own kernels: a full-precision base is quantized at load, and
+    an already-quantized ``mlx-community`` checkpoint trains at its own
+    precision (``utils.mlx.plan_mlx_base_precision``).
 
     On CPU, bitsandbytes 4-bit / 8-bit cannot run — the guard downgrades to
     ``"none"`` with a warning.  On CUDA / MPS the value is passed through

@@ -35,7 +35,7 @@ class MLXGRPOTrainerWrapper:
 
         cfg = self.config
         console.print(f"[dim]Loading MLX model for GRPO: {cfg.base}[/]")
-        self.model, self.tokenizer = load_mlx_model(
+        self.model, self.tokenizer, _ = load_mlx_model(
             cfg.base, quantization=cfg.training.quantization
         )
         self._dataset = dataset

@@ -31,6 +31,8 @@ def _install_fake_mlx(monkeypatch):
     """
     mlx = types.ModuleType("mlx")
     mlx_core = types.ModuleType("mlx.core")
+    # train() seeds mx.random before LoRA init (utils/seeding.apply_mlx_training_seed).
+    mlx_core.random = types.SimpleNamespace(seed=lambda seed: None)
     mlx_optimizers = types.ModuleType("mlx.optimizers")
     mlx_optimizers.AdamW = lambda **kwargs: object()
     # #686 wires a real LR schedule, so the MLX backend now reaches these three

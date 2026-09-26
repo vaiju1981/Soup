@@ -41,7 +41,13 @@ def harness_run(monkeypatch, tmp_path):
     core = sys.modules["mlx.core"]
     core.reset_peak_memory = lambda: None
     core.get_peak_memory = lambda: 512 * 1024**2
-    monkeypatch.setattr(mlx_utils, "load_mlx_model", lambda *a, **k: (_FakeMlxModel(), object()))
+    monkeypatch.setattr(
+        mlx_utils,
+        "load_mlx_model",
+        lambda *a, **k: (
+            _FakeMlxModel(), object(), mlx_utils.MlxBasePrecision(source="checkpoint", bits=4)
+        ),
+    )
     artifacts = tmp_path / "benchmark"
     artifacts.mkdir()
     monkeypatch.setattr(harness.tempfile, "mkdtemp", lambda **k: str(artifacts))

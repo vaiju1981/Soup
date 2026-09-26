@@ -75,19 +75,9 @@ _MLX_SFT: tuple[SupportEntry, ...] = (
     # "MLX backend ignores:" line. The five fields this table used to carry --
     # max_grad_norm, warmup_ratio, weight_decay, optimizer, scheduler -- were
     # wired by #734 and #750 and are now honoured, so they are gone rather than
-    # reclassified. The guard is what noticed; see the PR body.
-    SupportEntry(
-        "training.seed",
-        IGNORED,
-        "MLX seeds through mx.random, not this field",
-        trainer_reads=True,
-    ),
-    SupportEntry(
-        "training.data_seed",
-        IGNORED,
-        "MLX seeds through mx.random, not this field",
-        trainer_reads=True,
-    ),
+    # reclassified. The guard is what noticed; see the PR body. training.seed
+    # and training.data_seed left the same way once MLX seeded mx.random and
+    # numpy from them (utils/seeding.apply_mlx_training_seed).
     SupportEntry(
         "training.use_galore",
         IGNORED,

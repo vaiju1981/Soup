@@ -90,9 +90,9 @@ streaming dataset still needs `datasets` because that data source owns the
 dependency; the local file path below does not.
 
 `detect_device()` and `get_gpu_info()` recognise Apple Silicon when
-`backend: mlx` is set, preserving `training.quantization: 4bit` for
-`mlx-community` pre-quantized checkpoints instead of silently downgrading to
-`none` ([#423](https://github.com/MakazhanAlpamys/Soup/issues/423)). The
+`backend: mlx` is set, preserving `training.quantization: 4bit` for MLX to
+apply (see [Quantization](#quantization) below) instead of silently
+downgrading to `none` ([#423](https://github.com/MakazhanAlpamys/Soup/issues/423)). The
 CUDA-shaped analytical VRAM preflight is skipped on the MLX path because Apple
 unified memory is managed by Metal, not a fixed CUDA VRAM pool.
 
@@ -114,6 +114,41 @@ training:
 ```
 
 MLX backend supports SFT. `backend: mlx` with `task: dpo` or `task: grpo` is refused when the config is loaded, with an error naming the task — upstream `mlx-lm` ships no DPO/GRPO training helper, so those wrappers exist only as a backstop for callers that bypass config validation. Requires `mlx-lm >= 0.31.3`. Use `soup recipes search --tag mlx` for ready-made Apple Silicon configs.
+
+#### Quantization
+
+`training.quantization` is the precision the frozen base trains at, as on the
+transformers backend. `base` can be a full-precision Hugging Face model or an
+already-quantized `mlx-community` checkpoint:
+
+| base | `4bit` (default) / `8bit` | `none` |
+|---|---|---|
+| full precision | quantized at load with mlx-lm's `quantize_model` (the call `mlx_lm.convert -q` makes, affine, group size 64), then LoRA trains on top: QLoRA | trains as stored |
+| already quantized | trains at the checkpoint's precision; a warning names it when it is not the setting's width | trains at the checkpoint's precision, with a warning |
+
+A quantized checkpoint can be neither restored to full precision nor
+re-quantized without compounding the loss, so the setting cannot change it. That
+case warns instead of refusing because the schema has no value for most widths
+`mlx-community` ships (3-, 5- and 6-bit, mixed recipes).
+
+Loading prints `Base precision: ...`, and `adapter_config.json` records it under
+`base_quantization` (`source` is `load_time`, `checkpoint` or `full_precision`).
+An adapter trained on a base quantized at load names the full-precision `model`,
+so `mlx_lm.load(model, adapter_path=...)` applies it to the full-precision
+weights by default; `base_quantization` is the record that the two differ.
+
+Before this, the setting was not read on MLX: a full-precision `base` trained
+in bf16 while the setup panel said `Quant: 4bit`. On Qwen2.5-0.5B-Instruct that
+was 1.87 GB peak against 1.08 GB for the 4-bit run the panel described.
+
+#### Seeds
+
+`training.seed` seeds `mx.random` (LoRA initialisation and dropout) and
+`training.data_seed` seeds the batch order, following `seed` when unset — the
+same split as the transformers trainers. Two runs with the same seed log
+identical losses on the same machine. Before this MLX seeded nothing and warned
+`MLX backend ignores: training.seed`, while the setup panel still reported
+`Seed: 42`.
 
 #### Optimizers and schedules
 

@@ -8,6 +8,7 @@ enable MLX training paths without hard-depending on the ``mlx`` package.
 from __future__ import annotations
 
 import platform
+from dataclasses import dataclass, replace
 from typing import Any, Optional
 
 
@@ -137,16 +138,150 @@ def estimate_mlx_batch_size(
     return max(1, min(batch, 32))
 
 
+#: The ``training.quantization`` values ``backend: mlx`` accepts, as bit widths
+#: (``None`` is full precision). The schema refuses every other value for MLX.
+_MLX_QUANTIZATION_BITS: dict[str, Optional[int]] = {"4bit": 4, "8bit": 8, "none": None}
+
+#: Group size and mode for quantizing at load: mlx-lm's ``affine`` defaults,
+#: which are what ``mlx_lm.convert -q`` used to build the ``mlx-community``
+#: ``*-4bit`` / ``*-8bit`` checkpoints.
+_LOAD_TIME_GROUP_SIZE = 64
+_LOAD_TIME_MODE = "affine"
+
+#: Keys of mlx-lm's ``quantization`` config that are not per-layer overrides.
+_QUANTIZATION_DEFAULT_KEYS = frozenset({"group_size", "bits", "mode"})
+
+
+@dataclass(frozen=True)
+class MlxBasePrecision:
+    """The precision an MLX run trains its frozen base at, and where it came from.
+
+    ``source`` is ``"full_precision"`` (an unquantized checkpoint trained as
+    stored), ``"load_time"`` (an unquantized checkpoint Soup quantized while
+    loading it) or ``"checkpoint"`` (a checkpoint that was already quantized).
+    """
+
+    source: str
+    bits: Optional[int] = None
+    group_size: Optional[int] = None
+    mode: Optional[str] = None
+    per_layer_overrides: bool = False
+    #: Set when ``training.quantization`` asked for a precision the run does not
+    #: train at, which only happens with an already-quantized checkpoint.
+    mismatch: Optional[str] = None
+
+    def describe(self) -> str:
+        if self.source == "full_precision":
+            return "full precision, as stored in the checkpoint"
+        width = f"{self.bits}-bit {self.mode}" if self.bits else str(self.mode)
+        if self.source == "load_time":
+            return f"{width}, quantized from full precision at load (QLoRA)"
+        overrides = " with per-layer overrides" if self.per_layer_overrides else ""
+        return f"{width}{overrides}, as quantized in the checkpoint"
+
+    def as_metadata(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "bits": self.bits,
+            "group_size": self.group_size,
+            "mode": self.mode,
+            "per_layer_overrides": self.per_layer_overrides,
+        }
+
+
+def _checkpoint_quantization(model_config: dict) -> Optional[dict]:
+    """The quantization ``mlx_lm.load`` applied, from the config it returned.
+
+    ``mlx_lm.utils.load_model`` writes every format it converts (mxfp4, AWQ,
+    GPTQ, compressed-tensors) into ``config["quantization"]``. ``bitnet`` is the
+    one it applies without writing that key, so it is read from
+    ``quantization_config`` instead.
+    """
+    quantization = model_config.get("quantization")
+    if isinstance(quantization, dict):
+        return quantization
+    legacy = model_config.get("quantization_config")
+    if isinstance(legacy, dict) and legacy.get("quant_method"):
+        return {"bits": legacy.get("bits"), "mode": legacy["quant_method"]}
+    return None
+
+
+def plan_mlx_base_precision(
+    model_config: dict, quantization: str, *, base: str
+) -> MlxBasePrecision:
+    """Decide the precision the base trains at.
+
+    An unquantized checkpoint is quantized at load to the width
+    ``training.quantization`` names, which is mlx-lm's QLoRA path and the same
+    meaning the setting has on the transformers backend. A checkpoint that is
+    already quantized can be neither restored to full precision nor
+    re-quantized without compounding the loss, so it trains at its own
+    precision, and ``mismatch`` says so when that differs from the setting.
+    That is a warning rather than a refusal because the schema has no value
+    for most widths ``mlx-community`` ships (3-, 5- and 6-bit, mixed recipes),
+    so a refusal would leave those checkpoints with no config that trains them.
+    """
+    if quantization not in _MLX_QUANTIZATION_BITS:
+        raise ValueError(
+            f"training.quantization: {quantization} has no MLX equivalent; "
+            f"use one of {sorted(_MLX_QUANTIZATION_BITS)}"
+        )
+    requested_bits = _MLX_QUANTIZATION_BITS[quantization]
+
+    checkpoint = _checkpoint_quantization(model_config)
+    if checkpoint is None:
+        if requested_bits is None:
+            return MlxBasePrecision(source="full_precision")
+        return MlxBasePrecision(
+            source="load_time",
+            bits=requested_bits,
+            group_size=_LOAD_TIME_GROUP_SIZE,
+            mode=_LOAD_TIME_MODE,
+        )
+
+    precision = MlxBasePrecision(
+        source="checkpoint",
+        bits=checkpoint.get("bits"),
+        group_size=checkpoint.get("group_size"),
+        mode=checkpoint.get("mode", "affine"),
+        per_layer_overrides=any(key not in _QUANTIZATION_DEFAULT_KEYS for key in checkpoint),
+    )
+    if precision.bits == requested_bits:
+        return precision
+    wanted = "full precision" if requested_bits is None else f"{requested_bits}-bit"
+    return replace(
+        precision,
+        mismatch=(
+            f"training.quantization: {quantization} is not applied: {base} is already "
+            f"quantized ({precision.describe()}) and trains at that precision. On MLX "
+            "the setting quantizes a full-precision base; point base at the "
+            f"full-precision model to train at {wanted}."
+        ),
+    )
+
+
 def load_mlx_model(
     model_path: str, quantization: str = "4bit",
-) -> tuple[Any, Any]:
-    """Thin wrapper around ``mlx_lm.load`` (lazy import).
+) -> tuple[Any, Any, MlxBasePrecision]:
+    """Load a model with ``mlx_lm`` at the precision ``quantization`` asks for.
 
-    ``quantization`` is informational: MLX models are typically already
-    quantized at build time (e.g. ``mlx-community/...-4bit``), so this
-    parameter is currently advisory and is not forwarded to ``mlx_lm.load``.
+    The weights load lazily and are evaluated once, after any quantization,
+    which is the order ``mlx_lm.convert -q`` uses: an unquantized base is
+    quantized layer by layer rather than first materialised in full.
     """
-    del quantization  # advisory only — MLX models are pre-quantized
+    import mlx.core as mx
     from mlx_lm import load
+    from mlx_lm.utils import quantize_model
 
-    return load(model_path)
+    model, tokenizer, model_config = load(model_path, lazy=True, return_config=True)
+    precision = plan_mlx_base_precision(model_config, quantization, base=model_path)
+    if precision.source == "load_time":
+        model, _ = quantize_model(
+            model,
+            model_config,
+            group_size=precision.group_size,
+            bits=precision.bits,
+            mode=precision.mode,
+        )
+    mx.eval(model.parameters())
+    return model, tokenizer, precision

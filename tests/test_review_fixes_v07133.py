@@ -403,8 +403,12 @@ class TestMlxOptimizer:
             lambda step: scheds[-1](step)
         )
         mlx_root = types.ModuleType("mlx")
+        core_mod = types.ModuleType("mlx.core")
+        # train() seeds mx.random before LoRA init (utils/seeding.apply_mlx_training_seed).
+        core_mod.random = types.SimpleNamespace(seed=lambda seed: None)
 
         monkeypatch.setitem(sys.modules, "mlx", mlx_root)
+        monkeypatch.setitem(sys.modules, "mlx.core", core_mod)
         monkeypatch.setitem(sys.modules, "mlx.optimizers", opt_mod)
         monkeypatch.setitem(sys.modules, "mlx_lm", mlx_lm_mod)
         monkeypatch.setitem(sys.modules, "mlx_lm.tuner", tuner_mod)

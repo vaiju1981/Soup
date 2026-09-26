@@ -80,3 +80,26 @@ def apply_training_seed(tcfg: Any) -> int:
     set_seed(seed)
     logger.debug("training seed %d applied before model build", seed)
     return seed
+
+
+def apply_mlx_training_seed(tcfg: Any) -> int:
+    """Seed the two RNGs an MLX run draws from, as ``mlx_lm.lora --seed`` does.
+
+    ``mx.random`` draws LoRA's ``lora_a`` initialisation and the dropout masks.
+    numpy's global RNG draws the batch order: mlx-lm's ``iterate_batches`` and
+    Soup's masked one both shuffle with ``np.random.permutation``, and mlx-lm's
+    ``train()`` passes them no seed of their own. ``data_seed``, when set, takes
+    the batch order and otherwise it follows ``seed`` -- HF's meaning for the pair.
+
+    Call it immediately before the LoRA layers are created, the run's first draw.
+    Returns the seed applied so a caller can report it.
+    """
+    import mlx.core as mx
+    import numpy as np
+
+    seed = resolve_training_seed(tcfg)
+    data_seed = getattr(tcfg, "data_seed", None)
+    mx.random.seed(seed)
+    np.random.seed(seed if data_seed is None else int(data_seed))
+    logger.debug("MLX training seed %d applied before LoRA init", seed)
+    return seed

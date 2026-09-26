@@ -128,11 +128,10 @@ pick `seed` up for their samplers as well.
 Through v0.73.0 this reached the **SFT** trainer only, so `training.seed: 7` on
 a DPO or GRPO run was accepted and silently trained at 42.
 
-The one path that still ignores both fields is the **MLX backend**
-(`backend: mlx`), whose trainers seed nothing at all — MLX has its own RNG
-(`mx.random`). Setting either field there now prints a warning naming it
-(`MLX backend ignores: training.seed ...`) rather than accepting it in silence,
-so an MLX run cannot look seeded while it is not.
+The **MLX backend** (`backend: mlx`) seeds its own two RNGs from the same
+fields: `seed` drives `mx.random` (LoRA initialisation and dropout) and
+`data_seed`, or `seed` when it is unset, drives the batch order. Until then it
+seeded nothing and only warned `MLX backend ignores: training.seed`.
 
 **Not a determinism guarantee.** A fixed seed makes the *software* RNG
 reproducible. It does not make CUDA kernels bit-reproducible — non-deterministic

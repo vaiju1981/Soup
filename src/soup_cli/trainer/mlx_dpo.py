@@ -36,11 +36,11 @@ class MLXDPOTrainerWrapper:
 
         cfg = self.config
         console.print(f"[dim]Loading MLX model for DPO: {cfg.base}[/]")
-        self.model, self.tokenizer = load_mlx_model(
+        self.model, self.tokenizer, _ = load_mlx_model(
             cfg.base, quantization=cfg.training.quantization
         )
         # Reference model: frozen copy of base
-        self.ref_model, _ = load_mlx_model(cfg.base, quantization=cfg.training.quantization)
+        self.ref_model, _, _ = load_mlx_model(cfg.base, quantization=cfg.training.quantization)
         self._dataset = dataset
 
     def train(self, resume_from: Optional[str] = None) -> None:

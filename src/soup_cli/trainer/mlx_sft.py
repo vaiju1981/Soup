@@ -25,6 +25,8 @@ from rich.console import Console
 
 from soup_cli.config.schema import SoupConfig
 from soup_cli.trainer.loss_summary import summarize_training_loss
+from soup_cli.utils.seeding import apply_mlx_training_seed
+from soup_cli.utils.terminal import for_terminal
 
 console = Console()
 
@@ -255,6 +257,7 @@ class MLXSFTTrainerWrapper:
         self.model = None
         self.tokenizer = None
         self.trainer = None
+        self._base_precision = None
 
     def _require_mlx(self) -> None:
         try:
@@ -295,8 +298,6 @@ class MLXSFTTrainerWrapper:
                 "data.train_on_prompt (MLX masks the prompt or supervises the "
                 "whole sequence; there is no per-field switch)"
             )
-        if tcfg.quantization == "8bit":
-            unsupported.append("quantization=8bit (use mlx-community 4bit models)")
         if tcfg.use_galore:
             unsupported.append("GaLore")
         if getattr(tcfg, "use_lorafa", False):
@@ -336,14 +337,6 @@ class MLXSFTTrainerWrapper:
                 "training.use_fsdp2_compile (torch.compile on FSDP2 requires "
                 "CUDA and the transformers backend)"
             )
-        # #353's fourth criterion. #381 threaded training.seed through every
-        # transformers task wrapper; MLX has its own RNG (mx.random) and reads
-        # neither field, so a seeded MLX run is silently unseeded. `is not None`
-        # rather than truthiness: 0 is a real seed.
-        if tcfg.seed is not None:
-            unsupported.append("training.seed (MLX seeds through mx.random)")
-        if tcfg.data_seed is not None:
-            unsupported.append("training.data_seed (MLX seeds through mx.random)")
         if isinstance(tcfg.gradient_checkpointing, str):
             unsupported.append(
                 f"gradient_checkpointing tier {tcfg.gradient_checkpointing!r} "
@@ -378,13 +371,18 @@ class MLXSFTTrainerWrapper:
 
         cfg = self.config
         console.print(f"[dim]Loading MLX model: {cfg.base}[/]")
-        self.model, self.tokenizer = load_mlx_model(
+        self.model, self.tokenizer, self._base_precision = load_mlx_model(
             cfg.base, quantization=cfg.training.quantization
         )
         console.print(
             f"[green]MLX model loaded:[/] {cfg.base} "
             f"(task={cfg.task}, lora_r={cfg.training.lora.r})"
         )
+        console.print(
+            f"[dim]Base precision: {for_terminal(self._base_precision.describe())}[/]"
+        )
+        if self._base_precision.mismatch:
+            console.print(f"[yellow]{for_terminal(self._base_precision.mismatch)}[/]")
         self._dataset = dataset
 
     def _apply_lora(self, model) -> None:
@@ -435,9 +433,10 @@ class MLXSFTTrainerWrapper:
         not a resume of training state: the step count and data position
         both restart from zero regardless of how far the checkpoint got.
         Say so rather than implying a full resume. Replaying the dataset
-        from the saved iteration is a separate, harder claim — it needs a
-        reproducible iteration order tied to training.seed/data_seed, which
-        the MLX path does not thread yet (#353) — and is out of scope here.
+        from the saved iteration is a separate, harder claim: the batch order
+        now follows training.data_seed / training.seed, but with no saved
+        iteration count there is nothing to fast-forward it to, so a warm
+        start draws that order from its beginning. Out of scope here.
 
         ``strict=False`` means a checkpoint saved under a different
         ``lora.r`` or ``target_modules`` drops every tensor in silence —
@@ -489,6 +488,8 @@ class MLXSFTTrainerWrapper:
                 "MLX backend: setup(dataset) must be called before train()"
             )
 
+        # #353: LoRA's initialisation is the run's first random draw.
+        apply_mlx_training_seed(cfg.training)
         self._apply_lora(self.model)
 
         if resume_from_checkpoint is not None:
@@ -913,6 +914,16 @@ class MLXSFTTrainerWrapper:
                     # the output dir is the only place a finished run says
                     # whether it clipped.
                     "max_grad_norm": float(cfg.training.max_grad_norm),
+                    # The precision the frozen base TRAINED at. An adapter from
+                    # a base quantized at load is loaded onto the full-precision
+                    # `model` above by default, so this is the only record that
+                    # training and inference precision differ. None means the
+                    # model was not loaded by setup(), so its precision is unknown.
+                    "base_quantization": (
+                        self._base_precision.as_metadata()
+                        if self._base_precision is not None
+                        else None
+                    ),
                 },
                 indent=2,
             )
